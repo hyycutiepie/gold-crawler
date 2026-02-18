@@ -2,9 +2,9 @@ name: Gold Price Bot
 
 on:
   schedule:
-    # Chạy mỗi 10 phút (tính theo giờ quốc tế UTC)
-    - cron: '*/10 * * * *' 
-  workflow_dispatch: # Nút bấm để bạn chạy tay khi muốn test
+    # Chạy mỗi 15 phút, từ 1:00 đến 11:00 UTC (tức 8:00 - 18:00 Việt Nam)
+    - cron: '*/15 1-11 * * *'
+  workflow_dispatch: # Cho phép bạn vẫn có thể nhấn nút chạy tay để test
 
 jobs:
   run-bot:
@@ -16,11 +16,10 @@ jobs:
       - name: Set up Python
         uses: actions/setup-python@v4
         with:
-          python-version: '3.10' # Cấu trúc with phải nằm dưới uses
+          python-version: '3.10'
 
       - name: Install dependencies
-        run: |
-          pip install requests beautifulsoup4 supabase
+        run: pip install requests beautifulsoup4 supabase
 
       - name: Run Crawler
         env:
