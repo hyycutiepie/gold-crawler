@@ -8,16 +8,17 @@ url = os.environ.get("SUPABASE_URL")
 key = os.environ.get("SUPABASE_SERVICE_ROLE_KEY")
 supabase = create_client(url, key)
 
-def clean_price(price_str):
+def clean_price(price_val):
+    """Chuyển đổi mọi định dạng về số float"""
     try:
-        if not price_str: return 0.0
-        # Xóa dấu chấm, dấu phẩy, khoảng trắng
-        clean_str = str(price_str).replace('.', '').replace(',', '').strip()
-        return float(clean_str)
+        if price_val is None: return 0.0
+        clean_str = "".join(filter(str.isdigit, str(price_val)))
+        return float(clean_str) if clean_str else 0.0
     except:
         return 0.0
 
 def save_gold(source_code, gold_type, buy, sell, web_url):
+    """Ghi đè dữ liệu lên Supabase"""
     data = {
         "source_code": source_code,
         "gold_type": gold_type,
@@ -46,9 +47,9 @@ def crawl_btmh():
                 name = cols[0].get_text(strip=True)
                 if any(x in name for x in ["SJC", "Kim Gia Bảo", "Nhẫn Tròn"]):
                     save_gold("BTMH", name, clean_price(cols[1].text), clean_price(cols[2].text), target_url)
-    except Exception as e: print(f"Lỗi BTMH: {e}")
+    except: print("Lỗi BTMH")
 
-# 2. DOJI (Sửa đổi để bóc tách bảng kỹ hơn)
+# 2. DOJI (Quét sâu hơn)
 def crawl_doji():
     print("🚀 Đang cào DOJI...")
     target_url = "https://giavang.doji.vn/"
@@ -56,23 +57,20 @@ def crawl_doji():
         headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'}
         res = requests.get(target_url, headers=headers, timeout=20)
         soup = BeautifulSoup(res.text, 'html.parser')
-        
-        # Tìm các dòng td có chứa text SJC hoặc DOJI
         rows = soup.find_all('tr')
         count = 0
         for row in rows:
-            cols = row.find_all('td')
+            cols = row.find_all(['td', 'th'])
             if len(cols) >= 3:
-                name = cols[0].get_text(strip=True)
-                # Lấy SJC Hà Nội và các loại chính
-                if "SJC" in name.upper() or "DOJI" in name.upper():
-                    buy = clean_price(cols[1].get_text(strip=True))
-                    sell = clean_price(cols[2].get_text(strip=True))
-                    if buy > 1000000: # Lọc bỏ các dòng rác không phải giá tiền
+                name = " ".join(cols[0].get_text().split())
+                if any(x in name.upper() for x in ["SJC", "DOJI", "AVPL"]):
+                    buy = clean_price(cols[1].get_text())
+                    sell = clean_price(cols[2].get_text())
+                    if buy > 1000000:
                         save_gold("DOJI", name, buy, sell, target_url)
                         count += 1
         if count == 0: print("⚠️ DOJI: Không tìm thấy dữ liệu.")
-    except Exception as e: print(f"❌ Lỗi DOJI: {e}")
+    except: print("Lỗi DOJI")
 
 # 3. PHÚ QUÝ
 def crawl_phuquy():
@@ -88,26 +86,30 @@ def crawl_phuquy():
                 name = cols[0].get_text(strip=True)
                 if any(x in name for x in ["SJC", "Phú Quý"]):
                     save_gold("PHUQUY", name, clean_price(cols[1].text), clean_price(cols[2].text), target_url)
-    except Exception as e: print(f"Lỗi Phú Quý: {e}")
+    except: print("Lỗi Phú Quý")
 
-# 4. BẢO TÍN MINH CHÂU (Dùng API chính chủ)
+# 4. BẢO TÍN MINH CHÂU (Xử lý định dạng XML đặc thù)
 def crawl_btmc():
-    print("🚀 Đang gọi API Bảo Tín Minh Châu...")
+    print("🚀 Đang gọi API Bảo Tín Minh Châu (XML)...")
     api_url = "http://api.btmc.vn/api/BTMCAPI/getpricebtmc?key=3kd8ub1llcg9t45hnoh8hmn7t5kc2v"
     try:
         res = requests.get(api_url, timeout=20)
-        data = res.json() # API trả về JSON
+        # Sử dụng 'xml' parser để đọc cấu trúc đặc biệt này
+        soup = BeautifulSoup(res.content, 'xml')
+        data_tags = soup.find_all('Data')
         
-        # Cấu trúc API BTMC thường nằm trong data hoặc list
-        # Giả định cấu trúc dựa trên API chuẩn của họ:
-        for item in data:
-            name = item.get('row_name', '')
-            buy = clean_price(item.get('buy', 0))
-            sell = clean_price(item.get('sell', 0))
+        count = 0
+        for tag in data_tags:
+            row_idx = tag.get('row')
+            # API này dùng n_1, n_2... theo số hàng
+            name = tag.get(f'n_{row_idx}')
+            buy = tag.get(f'pb_{row_idx}')
+            sell = tag.get(f'ps_{row_idx}')
             
-            if any(x in name for x in ["SJC", "Vàng Rồng Thăng Long"]):
-                save_gold("BTMC", name, buy, sell, "https://btmc.vn")
-                
+            if name and any(x in name for x in ["SJC", "Vàng Rồng Thăng Long", "Nhẫn Tròn"]):
+                save_gold("BTMC", name, clean_price(buy), clean_price(sell), "https://btmc.vn")
+                count += 1
+        if count == 0: print("⚠️ BTMC: Không tìm thấy dữ liệu phù hợp trong XML.")
     except Exception as e:
         print(f"❌ Lỗi API BTMC: {e}")
 
