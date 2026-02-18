@@ -11,7 +11,7 @@ supabase = create_client(url, key)
 def clean_price(price_val):
     try:
         if not price_val: return 0.0
-        # Lấy tất cả chữ số
+        # Chỉ giữ lại các con số
         clean_str = "".join(filter(str.isdigit, str(price_val)))
         return float(clean_str) if clean_str else 0.0
     except:
@@ -27,50 +27,44 @@ def save_gold(source_code, gold_type, buy, sell, web_url):
         "updated_at": "now()"
     }
     try:
+        # Sử dụng on_conflict để ghi đè dữ liệu cũ, tránh lỗi Duplicate Key
         supabase.table("gold_prices").upsert(data, on_conflict="source_code,gold_type").execute()
         print(f"✅ [{source_code}] {gold_type}: {buy} - {sell}")
     except Exception as e:
         print(f"❌ Lỗi lưu {source_code}: {e}")
 
-# HÀM TỔNG HỢP CÀO TỪ WEBGIA (Lấy DOJI, BTMC, SJC, PHÚ QUÝ)
-def crawl_webgia():
-    print("🚀 Đang cào dữ liệu tổng hợp từ WebGia...")
-    # Trang này tổng hợp giá vàng rất sạch
-    target_url = "https://webgia.com/gia-vang/sjc/" 
+# Hàm dùng chung để cào từ WebGia
+def crawl_from_webgia(source_code, target_url):
+    print(f"🚀 Đang cào {source_code} từ WebGia...")
     try:
         headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'}
         res = requests.get(target_url, headers=headers, timeout=20)
         soup = BeautifulSoup(res.text, 'html.parser')
         
-        # Tìm tất cả các bảng giá
-        tables = soup.find_all('table', class_='table-price')
-        
-        for table in tables:
-            rows = table.find_all('tr')
-            for row in rows:
-                cols = row.find_all('td')
-                if len(cols) >= 3:
-                    name_raw = cols[0].get_text(strip=True)
+        # Tìm bảng giá
+        table = soup.find('table', class_='table-price')
+        if not table:
+            # Nếu không thấy class table-price, thử tìm bảng bất kỳ
+            table = soup.find('table')
+            
+        rows = table.find_all('tr')
+        count = 0
+        for row in rows:
+            cols = row.find_all('td')
+            if len(cols) >= 3:
+                name = cols[0].get_text(strip=True)
+                # Chỉ lấy các loại vàng chính (SJC, Nhẫn, Rồng Thăng Long...)
+                if any(x in name.upper() for x in ["SJC", "NHẪN", "RỒNG THĂNG LONG", "DOJI", "PNJ"]):
                     buy = clean_price(cols[1].get_text(strip=True))
                     sell = clean_price(cols[2].get_text(strip=True))
-                    
-                    # Phân loại dữ liệu dựa trên tên hàng
-                    # DOJI
-                    if "DOJI" in name_raw.upper():
-                        save_gold("DOJI", name_raw, buy, sell, target_url)
-                    
-                    # BẢO TÍN MINH CHÂU
-                    elif "MINH CHÂU" in name_raw.upper() or "BTMC" in name_raw.upper():
-                        save_gold("BTMC", name_raw, buy, sell, target_url)
-                        
-                    # PHÚ QUÝ
-                    elif "PHÚ QUÝ" in name_raw.upper():
-                        save_gold("PHUQUY", name_raw, buy, sell, target_url)
-                        
+                    if buy > 100000:
+                        save_gold(source_code, name, buy, sell, target_url)
+                        count += 1
+        if count == 0: print(f"⚠️ {source_code}: Không tìm thấy dữ liệu.")
     except Exception as e:
-        print(f"❌ Lỗi crawl WebGia: {e}")
+        print(f"❌ Lỗi {source_code}: {e}")
 
-# 1. BẢO TÍN MẠNH HẢI (Trang này vẫn cào trực tiếp được vì cấu trúc ổn)
+# 1. BẢO TÍN MẠNH HẢI (Vẫn cào trực tiếp vì web này rất nhanh và dễ)
 def crawl_btmh():
     print("🚀 Đang cào Bảo Tín Mạnh Hải...")
     target_url = "https://baotinmanhhai.vn/gia-vang-hom-nay"
@@ -86,8 +80,29 @@ def crawl_btmh():
                     save_gold("BTMH", name, clean_price(cols[1].text), clean_price(cols[2].text), target_url)
     except: print("Lỗi BTMH")
 
+# 2. PHÚ QUÝ (Vẫn cào trực tiếp được)
+def crawl_phuquy():
+    print("🚀 Đang cào Phú Quý...")
+    target_url = "https://phuquygroup.vn/"
+    try:
+        res = requests.get(target_url, headers={'User-Agent': 'Mozilla/5.0'}, timeout=20)
+        soup = BeautifulSoup(res.text, 'html.parser')
+        rows = soup.select('table tr')
+        for row in rows:
+            cols = row.find_all('td')
+            if len(cols) >= 3:
+                name = cols[0].get_text(strip=True)
+                if any(x in name for x in ["SJC", "Phú Quý"]):
+                    save_gold("PHUQUY", name, clean_price(cols[1].text), clean_price(cols[2].text), target_url)
+    except: print("Lỗi Phú Quý")
+
 if __name__ == "__main__":
-    # Ưu tiên cào WebGia để lấy DOJI, BTMC, PHUQUY
-    crawl_webgia()
-    # Mạnh Hải cào riêng
+    # Cào DOJI từ WebGia
+    crawl_from_webgia("DOJI", "https://webgia.com/gia-vang/doji/")
+    
+    # Cào Bảo Tín Minh Châu từ WebGia
+    crawl_from_webgia("BTMC", "https://webgia.com/gia-vang/bao-tin-minh-chau/")
+    
+    # Cào 2 nguồn còn lại trực tiếp
     crawl_btmh()
+    crawl_phuquy()
