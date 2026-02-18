@@ -1,0 +1,29 @@
+name: Gold Price Bot
+
+on:
+  schedule:
+    # Chạy mỗi 10 phút (tính theo giờ quốc tế UTC)
+    - cron: '*/10 * * * *' 
+  workflow_dispatch: # Nút bấm để bạn chạy tay khi muốn test
+
+jobs:
+  run-bot:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.10' # Cấu trúc with phải nằm dưới uses
+
+      - name: Install dependencies
+        run: |
+          pip install requests beautifulsoup4 supabase
+
+      - name: Run Crawler
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+        run: python crawl_gold.py
